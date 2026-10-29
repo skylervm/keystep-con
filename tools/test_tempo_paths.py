@@ -15,6 +15,7 @@ from unicorn.arm_const import (
 
 from firmware_models import MODELS, model_address
 from build_ksp_patch import model_source
+from build_names_patch import decode_thumb_bl
 
 BASE, STOP, SEQ, STACK = 0x08008000, 0x08007FF0, 0x20020000, 0x20070000
 STOCK = Path(__file__).resolve().parents[1] / "firmware"
@@ -119,6 +120,42 @@ class StockTempoPaths(unittest.TestCase):
                     self.assertTrue(STACK - 128 <= address < STACK or
                                     model.usb_queue <= address and address + size <= model.usb_queue + 264,
                                     f"unexpected write at {address:#x}")
+
+    def test_consumed_encoder_exits_stock_dispatch_without_side_effects(self):
+        for model in MODELS.values():
+            for entry in (model.encoder_up + 4, model.encoder_down + 4):
+                with self.subTest(model=model.name, entry=hex(entry)):
+                    uc = machine(model.read_stock(STOCK))
+                    uc.reg_write(UC_ARM_REG_R6, 0xFF)
+                    visited, writes = [], []
+
+                    def trace(m, address, _size, _data):
+                        visited.append(address)
+                        if address == model.loop_continue:
+                            m.emu_stop()
+
+                    uc.hook_add(UC_HOOK_CODE, trace)
+                    uc.hook_add(UC_HOOK_MEM_WRITE, lambda _m, _a, address, size, _v, _d: writes.append((address, size)))
+                    uc.emu_start(entry | 1, 0, count=100)
+                    self.assertEqual(visited[-1], model.loop_continue)
+                    self.assertEqual(writes, [])
+                    self.assertNotIn(model.tempo_get, visited)
+                    self.assertTrue(all(entry <= address < entry + 32 for address in visited[:-1]))
+
+    def test_tempo_page_selector_calls_the_expected_native_functions(self):
+        for model in MODELS.values():
+            with self.subTest(model=model.name):
+                raw = model.read_stock(STOCK)
+                entry = model_address(0x0801FAA0, model.name)
+                targets = []
+                for address in range(entry, entry + 0x72, 2):
+                    try:
+                        targets.append(decode_thumb_bl(address, raw[address - BASE:address - BASE + 4]))
+                    except ValueError:
+                        pass
+                self.assertEqual(targets.count(model_address(0x0801F96C, model.name)), 4)
+                self.assertEqual(targets.count(model.tempo_get), 1)
+                self.assertEqual(targets.count(model_address(0x08025494, model.name)), 1)
 
     def test_tick_counter_is_read_without_mutation(self):
         for model in MODELS.values():

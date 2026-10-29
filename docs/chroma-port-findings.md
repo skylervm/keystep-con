@@ -2,6 +2,9 @@
 
 Source baseline: upstream 2213071cce1badcea78d02d8b986d3b3542269bc. Official package SHA-256: a01b3d9909182e2b284074469d7bace6862587bfa7ffc2c8730d23aae51dfb32. All work below is offline.
 
+## Review hold
+Do not flash build 9. Independent review identified an execution-context gap; follow-up tracing confirms USB draining runs from a timer interrupt, rather than the foreground context assumed during implementation. The RX display-queue call and multiword lease publication need a concurrency-safe design before approval. Offline happy-path tests do not establish interrupt safety.
+
 ## Package selection
 The package has separate main and display images for PID 536 and PID 8728. Published upstream build 8 modifies only PID 536 images. PID 8728 selects Chroma. Both display payloads are identical after their separate 64-byte model headers.
 
@@ -39,3 +42,17 @@ Feedback queues an already-visible BPM page through native asynchronous queue pr
 The build script runs both complete upstream Con emulator suites using explicit model constants, stock path probes, tempo/parser/queue tests, both native renderer probes, feedback tests, fake-Live transport tests and an integrated firmware-to-bridge-to-display test stopped/playing. A headless browser reconstructs exactly the locally built firmware package from the official input. These tests never grant Web MIDI permissions or contact the device.
 
 Actual Live 12 beta loading, physical USB/display timing, sequencing, settings preservation and full-boot scratch ownership remain device checks. No new firmware is installed. The public free-memory observations cited above are contextual evidence, not our own physical proof.
+
+
+## Post-review evidence
+The handled-event sentinel 0xFF is accepted by both stock dispatch continuations. The new test executes each original/Chroma up/down continuation with r6=0xFF until its event-loop exit; all four paths write no memory and invoke no tempo/menu callee. A second test checks both native tempo selectors call the expected clear-flags routine four times, the model tempo getter once, and the page-1 queue once.
+
+USB execution context is NOT foreground. Exact stock call chains:
+- Original vector slot 71: 0x0803D1F1; wrapper BL at 0x0803D1F4 to timer handler 0x0804259A; callback BL at 0x080426AE to 0x0804953C; USB drain BL at 0x08049602 to 0x08018B24; tapped parser call 0x08018B58.
+- Chroma vector slot 71: 0x0803D751; wrapper BL at 0x0803D754 to timer handler 0x08042AFA; callback BL at 0x08042C0E to 0x08049BBC; USB drain BL at 0x08049C82 to 0x08018C80; tapped parser call 0x08018CB4.
+- The wrapper passes timer handle 0x2000168C / 0x20001690. The callback selects that handle before draining USB.
+- By contrast, the encoder event worker 0x08012338 / 0x0801254C is called from main application code at 0x08016954 / 0x08016B04 (and later main-loop sites). The original reset/application chain was traced during boot qualification.
+
+These image facts invalidate the prior single-context assumption. No runtime fix has been applied. The review hold remains while the user decides on the review-driven behavioral change. The package and Live bridge are not installed.
+
+Known display limitation: silent lease expiry does not schedule an idle repaint. A stale host BPM may remain visible until a native redraw or knob turn. Explicit disable does queue repaint. The physical checklist must cover silent loss without forcing a renderer call.

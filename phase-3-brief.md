@@ -7,7 +7,7 @@ inferred:
 evidence / current state:
   Branch feature/chroma-tempo, upstream baseline 2213071cce1badcea78d02d8b986d3b3542269bc. No firmware flash or installed Live-script overwrite. See docs/chroma-port-findings.md for mappings and offline evidence.
   Actual buffered USB caller is original 0x08018B58 / Chroma 0x08018CB4. It sees full F0/F7 framing and parser engine+0x164. DIN uses engine+0x214 and remains unhooked. A pure tap preserves original byte parsing.
-  Boot hook wraps original 0x08016482 / Chroma 0x0801667E and clears reserved state only AFTER stock SDRAM initialization returns. No early SDRAM access.
+  Boot hook wraps original 0x08016482 / Chroma 0x0801667E and clears reserved state only AFTER stock SDRAM initialization returns. Post-review timer-IRQ discovery requires rechecking timer-enable ordering as part of the concurrency correction.
   State uses existing Con gaps: pad+8 host BPM, pad+12 last-rendered BPM, pad+484..511 lease/framing. Pad magic bumped in all consumers. Bass scratch starts at pad+512.
   Both native renderers are covered: project screen 0 (original 0x080264F0, Chroma 0x080267FC) and dedicated tempo screen 1 (0x08026624 / 0x08026930). Their discarded descriptor slots provide eight stack bytes at renderer-SP+16 / +8, proven by access watchpoints. Synthetic records preserve real project data; the real native formatter handles full-width hundredths through 999.00 BPM.
   Changed valid feedback queues the visible BPM renderer through native queue-only primitives (0x0802546C / 0x08025494, mapped for Chroma). These do not change UI edit flags. Full page-selection helpers were rejected for RX feedback because they clear other cached edit flags. Physical knob movement still uses the normal tempo-page selector with stock menu guards.
@@ -28,6 +28,6 @@ acceptance:
 assumptions:
   Supported Arturia 2.5.20 input only. Existing Con scratch ownership is inherited and cross-checked against a public author's reported free range; not a physical proof. Clock/display/USB timing and Live beta loading remain physical checks.
 blocking:
-  None for offline implementation. Independent final review and separate flash approval remain required.
+  Independent review is complete and withholds flash clearance. Follow-up tracing confirms RX is a timer interrupt. A concurrency-safe state/display handoff, package-format correction and review follow-up require the user review decision before runtime changes. See docs/chroma-port-findings.md.
 routing:
   Pinned Hybrid: Fable orchestrator, current Sol 6.1 high implementer, fresh Opus 5.5 high final reviewer. Manual fallback only; no optional agents. Reviewer must inspect final source/diff, especially RAM ownership, ARM register/stack preservation, MIDI framing/queue atomicity, session lifecycle and model guards. Return every actionable finding with severity and file/line, or state no findings; distinguish device-only gaps. Do not modify files or narrate progress.

@@ -1,6 +1,6 @@
 # KeyStep Con for Chroma with Ableton tempo control
 
-Status: approved 2026-10-29. Fork created. No newly developed firmware may be flashed without separate approval.
+Status: plan approved 2026-10-29; offline candidate on review hold for timer-interrupt concurrency correction. Fork created. No newly developed firmware may be flashed without separate approval.
 
 intent:
   Run Con on Chroma with bidirectional tempo control: the dedicated knob changes Live BPM and Live changes update both native BPM displays, while Live remains clock master.
