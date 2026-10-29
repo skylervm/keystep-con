@@ -245,7 +245,7 @@ def chord_pads(path: Path) -> None:
     emu = link.emu
     block = lambda proj: bytes(emu.nor[(proj - 1) * 0x20000 + 0x1FEF0:(proj - 1) * 0x20000 + 0x1FFF0])
     pad_state = 0xC01EF800
-    emu.uc.mem_write(pad_state, b"ZDAQ")
+    emu.uc.mem_write(pad_state, b"ZDAR")
     emu.uc.mem_write(pad_state + 6, b"\x02")                  # RAM copy holds project 3
     emu.uc.mem_write(pad_state + 112, b"\x01")                # with an undo pending
     pads = [[60, 64, 67], [], [62, 65, 69, 72, 74]]

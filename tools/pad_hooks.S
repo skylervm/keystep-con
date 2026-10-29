@@ -90,7 +90,7 @@
 @ state in external RAM, in a stretch no stock code references (below the
 @ save staging buffer at 0xC01F0000); not cleared at boot, so it carries a magic
 .equ PAD_STATE,     0xC01EF800
-.equ PAD_MAGIC,     0x5141445a      @ "ZDAQ" (v9 layout)
+.equ PAD_MAGIC,     0x5241445a      @ "ZDAR" (v10 layout, tempo lease at 484..511)
 .equ ST_MODE,       4               @ 0 off, 1 drum pads, 2-4 chord pads for track 2-4,
                                     @ 5-8 root chords for track 1-4
 .equ CT_MODE,       5

@@ -35,7 +35,7 @@ typedef unsigned int u32;
 #define LEDS_PTR    (*(u8 *volatile *)0x20001490)
 #define TRACK_COLOURS ((volatile u8 *)0x20000058)
 #define PAD         ((u8 *)0xC01EF800)                /* pad state (pad_hooks.S) */
-#define PAD_MAGIC   0x5141445au
+#define PAD_MAGIC   0x5241445au
 enum { ST_MODE = 4, ST_TAG = 6, ST_NOTE = 16, ST_TABLE = 128 };
 
 typedef u32 (*f_chord_flag)(u8 *seq, u32 track, u32 project);                 /* 0802d160 */
