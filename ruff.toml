@@ -1,0 +1,5 @@
+# Bug checks only; preserve the upstream source without formatting changes.
+[lint]
+select = ["E9", "F"]
+# Upstream has unused imports and locals. Keep this baseline source-free.
+ignore = ["F401", "F841"]
