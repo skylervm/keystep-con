@@ -1,9 +1,9 @@
 # Chroma port evidence
 
-Source baseline: upstream 2213071cce1badcea78d02d8b986d3b3542269bc. Official package SHA-256: a01b3d9909182e2b284074469d7bace6862587bfa7ffc2c8730d23aae51dfb32. All work below is offline.
+Source baseline: upstream 2213071cce1badcea78d02d8b986d3b3542269bc. Official package SHA-256: a01b3d9909182e2b284074469d7bace6862587bfa7ffc2c8730d23aae51dfb32. Offline qualification and subsequent Chroma device checks are distinguished below.
 
 ## Review status
-Build 11 contains the approved corrections and is cleared by independent final review for presentation as an experimental exact artifact. Separate flash approval and physical tests remain pending. Do not flash build 9. Independent review identified an execution-context gap; follow-up tracing confirms USB draining runs from a timer interrupt, rather than the foreground context assumed during implementation. That finding is addressed in the build-10 design below. Offline results do not establish physical timing or full-boot RAM ownership.
+Build 11 is installed on Chroma, where physical testing exposed the receive-object mismatch described below. Build 12 corrects that mismatch and is not installed. Do not flash superseded builds. Independent review identified an execution-context gap; follow-up tracing confirms USB draining runs from a timer interrupt, rather than the foreground context assumed during implementation. That finding is addressed in the build-10 design below. Offline results do not establish physical timing or full-boot RAM ownership.
 
 ## Package selection
 The package has separate main and display images for PID 536 and PID 8728. Published upstream build 8 modifies only PID 536 images. PID 8728 selects Chroma. Both display payloads are identical after their separate 64-byte model headers.
@@ -28,7 +28,7 @@ Tick getter: original 0x0803E440, Chroma 0x0803E9A0. Tick RAM is original 0x2000
 `test_tempo_paths.py` passes both variants, directions, clock modes and stopped/playing state fixtures. `test_model_hooks.py --model original` and `--model chroma` pass the full upstream pad, name and SysEx chord-save emulator assertions. The adapter changes model constants, not assertions, and runs the real mapped firmware routines where upstream tests run them. It retains upstream hardware stubs; success is not physical-device validation.
 
 ## Limits
-No new firmware is installed. Scratch RAM at 0xC01EF800..0xC01F0000 is inherited from Con; a separate public patch project reports both-model boot/workload observations covering the surrounding free region. Those observations are author-reported, not our own full-boot or physical-memory ownership proof. Physical tests are still required. No vendor firmware, derived binary dumps, or personal backups belong in Git.
+Build 11 is installed on Chroma only; build 12 awaits separate approval and physical testing. Scratch RAM at 0xC01EF800..0xC01F0000 is inherited from Con; a separate public patch project reports both-model boot/workload observations covering the surrounding free region. Those observations are author-reported, not our own full-boot or physical-memory ownership proof. Physical tests are still required. No vendor firmware, derived binary dumps, or personal backups belong in Git.
 
 
 ## Bidirectional tempo and display
@@ -41,7 +41,7 @@ Feedback queues an already-visible BPM page through native asynchronous queue pr
 ## Verification scope
 The build script runs both complete upstream Con emulator suites using explicit model constants, stock path probes, tempo/parser/queue tests, both native renderer probes, feedback tests, fake-Live transport tests and an integrated firmware-to-bridge-to-display test stopped/playing. A headless browser reconstructs exactly the locally built firmware package from the official input. These tests never grant Web MIDI permissions or contact the device.
 
-Actual Live 12 beta loading, physical USB/display timing, sequencing, settings preservation and full-boot scratch ownership remain device checks. No new firmware is installed. The public free-memory observations cited above are contextual evidence, not our own physical proof.
+Live 12.4.25b1 loaded bridge v2.0, build 11 was identified on Chroma, all 158 global settings matched the pre-flash snapshot, and physical transport reached the bridge. The tempo test failed as described below. Build 12 is not installed. Physical USB/display timing, sequencing and full-boot scratch ownership still require device checks. The public free-memory observations cited above are contextual evidence, not our own physical proof.
 
 
 ## Post-review evidence
@@ -53,7 +53,7 @@ USB execution context is NOT foreground. Exact stock call chains:
 - The wrapper passes timer handle 0x2000168C / 0x20001690. The callback selects that handle before draining USB.
 - By contrast, the encoder event worker 0x08012338 / 0x0801254C is called from main application code at 0x08016954 / 0x08016B04 (and later main-loop sites). The original reset/application chain was traced during boot qualification.
 
-These image facts invalidate the prior single-context assumption. The user approved addressing the findings. Build 10 now separates IRQ publication and foreground UI work, as described below. The package and Live bridge are not installed.
+These image facts invalidate the prior single-context assumption. The user approved addressing the findings. Build 10 separated IRQ publication and foreground UI work, as described below; that design is retained in installed build 11 and the uninstalled build-12 candidate. The Live bridge is installed and loaded.
 
 Build-9 limitation, corrected in build 10: silent lease expiry previously did not schedule an idle repaint. The foreground poll now schedules the visible stock BPM view on expiry as well as explicit disable. The offline test requests the redraw before manually invoking any renderer; physical confirmation is still required.
 
@@ -74,3 +74,25 @@ Review cleared all five original items, then identified a low-severity edge: an 
 The native UI wrapper comparison additionally watches stack reads throughout the stock update/callees and proves neither model reads caller stack arguments in the exercised native path. This closes the review's residual stack-argument question offline. Physical stack headroom remains a separate limitation.
 
 Build-11 full verification passes again, including 520 unmasked C instruction-boundary injections and eight hook tests. The eligible boundary count changed because the tick read and expiry check moved inside the protected region; this is not a reduction in the exercised code paths.
+
+## Physical receive-path failure and build 12
+
+Build 11 was installed on Chroma. Physical transport reached the Live bridge, but
+the controller kept its local BPM and emitted no custom tempo turns. An unchanged
+CoreMIDI relay captured the bridge's valid 136.50 BPM heartbeats about once per
+second and returned successful delivery to the controller's USB destination.
+
+The receive guard used the wrong object pointer: original 0x20001800 / Chroma
+0x20001804 is the send-side object used elsewhere in Con. The stock timer caller
+loads the USB receive object from original 0x200014C8 / Chroma 0x200014CC before
+calling the USB drain at 0x08049602 / 0x08049C82. Build 12 checks that receive
+pointer. The USB parser offset, boot-readiness check and lease protocol stay the
+same; the Live bridge does not change.
+
+The former emulator fixture populated the same incorrect pointer as the patch.
+It now decodes the object pointer from the hash-verified stock image, pins the
+stock drain-call destination, and checks that the candidate retains those caller
+instructions. It keeps the unrelated send object distinct and runs the native
+load instructions before draining USB. This regression fails against build 11 for
+both models and passes with the corrected guard. Physical tempo/display confirmation still requires
+separate approval and installation of the exact replacement candidate.

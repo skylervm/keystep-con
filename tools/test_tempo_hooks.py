@@ -53,7 +53,19 @@ class Fixture:
         start = model_address(0x0805CB60, name)
         count = model_address(0x20000650, name) - 0x20000004
         u.mem_write(0x20000004, self.raw[start-BASE:start-BASE+count])
-        self.put(model_address(0x20001800, name), OBJECT)
+        # Decode the stock IRQ caller's LDR r4,[pc,...]; LDR r0,[r4].
+        # The former fixture populated the patch's incorrect send-object pointer.
+        stock = self.model.read_stock(ROOT / "firmware")
+        call = self.paths["usb_drain_call"]
+        assert decode_thumb_bl(call, stock[call-BASE:call-BASE+4]) == self.paths["usb_drain"]
+        load = call - 4
+        assert self.raw[load-BASE:call-BASE+4] == stock[load-BASE:call-BASE+4]
+        opcode, dereference = struct.unpack_from("<HH", stock, load - BASE)
+        assert opcode & 0xFF00 == 0x4C00 and dereference == 0x6820
+        literal = ((load + 4) & ~3) + (opcode & 255) * 4
+        self.receive_pointer = struct.unpack_from("<I", stock, literal - BASE)[0]
+        self.put(self.receive_pointer, OBJECT)
+        self.put(model_address(0x20001800, name), OBJECT + 0x800)
         self.put(model_address(0x200014B8, name), BUTTONS)
         self.put(self.model.seq_pointer, SEQ)
         self.put(model_address(0x20001510, name), 0x20030000)
@@ -117,7 +129,8 @@ class Fixture:
             packets += bytes([cin]) + part.ljust(3, b"\0")
         self.uc.mem_write(BUFFER, bytes(packets))
         self.call(self.paths["usb_rx"], OBJECT, BUFFER, len(packets))
-        self.call(self.paths["usb_drain"], OBJECT)
+        self.call(self.paths["usb_drain_call"] - 4,
+                  stop=self.paths["usb_drain_call"] + 4)
 
     def turn(self, direction=0, magnitude=1, fine=False, index=0, mask=0):
         u = self.uc
@@ -157,6 +170,17 @@ class Fixture:
 
 
 class TempoHooks(unittest.TestCase):
+    def test_receive_guard_uses_stock_irq_object(self):
+        for name, pointer in (("original", 0x200014C8), ("chroma", 0x200014CC)):
+            with self.subTest(model=name):
+                f = Fixture(name)
+                self.assertEqual(f.receive_pointer, pointer)
+                self.assertNotEqual(f.word(model_address(0x20001800, name)), OBJECT)
+                f.usb(HEARTBEAT)
+                self.assertEqual(f.turn(), 255)
+                self.assertEqual(f.wire(), bytes.fromhex("f07d4b530102") +
+                                 pack21(SESSION) + bytes((0, 1, 0, 0xF7)))
+
     def test_usb_identity_framing_and_din_isolation(self):
         for name in MODELS:
             with self.subTest(model=name):

@@ -149,6 +149,7 @@ CHROMA_ADDRESSES = {
     0x20001498: 0x2000149C,
     0x200014A8: 0x200014AC,
     0x200014B8: 0x200014BC,
+    0x200014C8: 0x200014CC,
     0x200014D7: 0x200014DB,
     0x20001510: 0x20001514,
     0x200017F8: 0x200017FC,
@@ -176,10 +177,12 @@ CHROMA_LED_FLUSH_CALLS = (
 TEMPO_PATHS = {
     "original": {"usb_rx": 0x08018A74, "usb_drain": 0x08018B24, "usb_rx_call": 0x08018B58,
                  "din_rx": 0x08018B76, "din_rx_call": 0x08018B7C, "byte_parser": 0x0801A8A6,
-                 "boot_call": 0x08016482, "sdram_init": 0x08017C68},
+                 "boot_call": 0x08016482, "sdram_init": 0x08017C68,
+                 "usb_drain_call": 0x08049602},
     "chroma": {"usb_rx": 0x08018BD0, "usb_drain": 0x08018C80, "usb_rx_call": 0x08018CB4,
                "din_rx": 0x08018CD2, "din_rx_call": 0x08018CD8, "byte_parser": 0x0801AA02,
-               "boot_call": 0x0801667E, "sdram_init": 0x08017DC4},
+               "boot_call": 0x0801667E, "sdram_init": 0x08017DC4,
+               "usb_drain_call": 0x08049C82},
 }
 
 FOREGROUND_PATHS = {
