@@ -201,7 +201,24 @@ class TempoHooks(unittest.TestCase):
                 self.assertEqual(f.turn(), 255)
                 f.tick((0xFFFFFFF0 + 3001) & 0xFFFFFFFF)
                 self.assertEqual(f.turn(), 0)
-                self.assertEqual(f.word(LEASE), 0x32504D55)  # Published state is IRQ-owned; expiry is reader-local.
+                self.assertNotEqual(f.word(LEASE), 0x32504D55)
+
+    def test_expired_lease_cannot_revive_after_full_tick_wrap(self):
+        for name in MODELS:
+            for mask in (0, 1):
+                with self.subTest(model=name, mask=mask):
+                    f = Fixture(name)
+                    f.usb(HEARTBEAT)
+                    f.tick(13001)
+                    f.uc.reg_write(UC_ARM_REG_PRIMASK, mask)
+                    f.poll()
+                    self.assertEqual(f.uc.reg_read(UC_ARM_REG_PRIMASK), mask)
+                    f.tick(10000)  # Same tick value one complete 32-bit wrap later.
+                    self.assertEqual(f.turn(mask=mask), 0)
+                    self.assertEqual(f.word(f.model.usb_queue), 0)
+                    f.uc.reg_write(UC_ARM_REG_PRIMASK, 0)
+                    f.usb(heartbeat(session=SESSION + 1))
+                    self.assertEqual(f.turn(), 255)
 
     def test_bad_and_truncated_frames_do_not_renew(self):
         bad = (HEARTBEAT[:-1], HEARTBEAT[:-1] + b"\x00\xf7",

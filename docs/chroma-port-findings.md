@@ -3,7 +3,7 @@
 Source baseline: upstream 2213071cce1badcea78d02d8b986d3b3542269bc. Official package SHA-256: a01b3d9909182e2b284074469d7bace6862587bfa7ffc2c8730d23aae51dfb32. All work below is offline.
 
 ## Review status
-Build 10 contains the approved corrections and awaits independent follow-up review. Do not flash build 9. Independent review identified an execution-context gap; follow-up tracing confirms USB draining runs from a timer interrupt, rather than the foreground context assumed during implementation. That finding is addressed in the build-10 design below. Offline results do not establish physical timing or full-boot RAM ownership.
+Build 11 contains the approved corrections and awaits final review follow-up. Do not flash build 9. Independent review identified an execution-context gap; follow-up tracing confirms USB draining runs from a timer interrupt, rather than the foreground context assumed during implementation. That finding is addressed in the build-10 design below. Offline results do not establish physical timing or full-boot RAM ownership.
 
 ## Package selection
 The package has separate main and display images for PID 536 and PID 8728. Published upstream build 8 modifies only PID 536 images. PID 8728 selects Chroma. Both display payloads are identical after their separate 64-byte model headers.
@@ -66,3 +66,11 @@ Build-9 limitation, corrected in build 10: silent lease expiry previously did no
 - Instruction-boundary tests suspend foreground execution, save CPU context, run the full native USB receive/drain on a separate IRQ stack, then resume it. Both models pass all 608 unmasked C boundaries across polling, the knob hook and both renderers. Snapshots contain a coherent old or new token/BPM pair; RX does not change UI owner/queue/cache. Already-masked entry remains masked. This models preemption; it is not a hardware NVIC timing test.
 - Metadata is now a single checked version-string byte replacement. A test reverses just that replacement and requires byte-for-byte equality with stock info.json. Build 9 is superseded and was never flashed.
 - Whole build verification passes both complete Con model suites, 9 stock-path probes, 7 hook tests, 3 renderer tests, 4 foreground tests, 6 feedback tests, 3 concurrency tests, the metadata test, 14 fake-Live/integration tests and 7 installer checks. Physical timing, actual stack headroom, original-model hardware and scratch ownership remain the stated device limitations.
+
+
+## Build 11 expiry-wrap correction
+Review cleared all five original items, then identified a low-severity edge: an expired active marker could look fresh again after a full 32-bit millisecond tick wrap. Snapshot now reads the plain RAM tick getter and latches expiry by clearing only the active marker while interrupts remain masked. IRQ publication and the conditional foreground expiry clear are serialized; parser, token and BPM remain RX-owned. Validation/formatting/UI work remains outside the mask. A regression advances through expiry and then to the same tick value one full wrap later, confirms stock knob handling, and verifies a fresh heartbeat enables control again. Prior mask preservation is checked for both entry states.
+
+The native UI wrapper comparison additionally watches stack reads throughout the stock update/callees and proves neither model reads caller stack arguments in the exercised native path. This closes the review's residual stack-argument question offline. Physical stack headroom remains a separate limitation.
+
+Build-11 full verification passes again, including 520 unmasked C instruction-boundary injections and eight hook tests. The eligible boundary count changed because the tick read and expiry check moved inside the protected region; this is not a reduction in the exercised code paths.

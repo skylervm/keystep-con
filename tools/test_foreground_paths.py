@@ -2,8 +2,8 @@
 from pathlib import Path
 import struct
 import unittest
-from unicorn import UC_HOOK_CODE
-from unicorn.arm_const import UC_ARM_REG_PC, UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3, UC_ARM_REG_R4, UC_ARM_REG_APSR, UC_ARM_REG_PRIMASK
+from unicorn import UC_HOOK_CODE, UC_HOOK_MEM_READ
+from unicorn.arm_const import UC_ARM_REG_PC, UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3, UC_ARM_REG_R4, UC_ARM_REG_APSR, UC_ARM_REG_PRIMASK, UC_ARM_REG_SP, UC_ARM_REG_LR
 from build_names_patch import decode_thumb_bl
 from firmware_models import MODELS, model_address
 from test_display_paths import setup_renderer, OWNER, DISPLAY
@@ -80,20 +80,31 @@ class ForegroundPaths(unittest.TestCase):
                         f.put(f.word(p["update"] + 0x1D0), 0x20045000)
                         f.uc.mem_write(0x2004500E, struct.pack("<H", 12000))
                         f.uc.reg_write(UC_ARM_REG_PRIMASK, mask)
-                        order = []
+                        order, stack_arguments = [], []
+                        native = dict(active=False, stack=0, returned=0)
 
                         def trace(_u, address, _size, _data):
                             if address == p["update"]:
                                 order.append("native")
+                                native.update(active=True, stack=_u.reg_read(UC_ARM_REG_SP),
+                                              returned=_u.reg_read(UC_ARM_REG_LR) & ~1)
+                            elif address == native["returned"]:
+                                native["active"] = False
                             if address == f.poll_address:
                                 order.append("poll")
 
+                        def read_stack(_u, _access, address, size, _value, _data):
+                            if native["active"] and native["stack"] <= address < native["stack"] + 128:
+                                stack_arguments.append((address, size))
+
                         f.uc.hook_add(UC_HOOK_CODE, trace)
+                        f.uc.hook_add(UC_HOOK_MEM_READ, read_stack)
                         f.call(p["call"], OWNER, stop=p["call"] + 4)
                         results.append(tuple(f.uc.reg_read(reg) for reg in
                                              (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
                                               UC_ARM_REG_R3, UC_ARM_REG_APSR, UC_ARM_REG_PRIMASK)))
                         self.assertEqual(order, ["native", "poll"] if patched else ["native"])
+                        self.assertEqual(stack_arguments, [], "native UI update read caller stack arguments")
                     self.assertEqual(results[0], results[1])
 
     def test_native_ui_pointer_is_a_post_sdram_ready_guard(self):

@@ -37,11 +37,16 @@ static tempo_u32 snapshot(struct tempo_host *host)
     tempo_u32 magic = s->magic, heartbeat = s->heartbeat, inverse = s->heartbeat_inverse;
     host->session = s->session;
     host->bpm = HOST_BPM;
+    tempo_u32 tick = now();  /* Plain RAM getter; still inside the short mask. */
+    if (magic == TEMPO_ACTIVE && (tempo_u32)(tick - heartbeat) > TEMPO_LEASE_MS) {
+        s->magic = TEMPO_MAGIC;  /* Latch expiry so a full tick wrap cannot revive it. */
+        magic = TEMPO_MAGIC;
+    }
     irq_restore(mask);
     return magic == TEMPO_ACTIVE && inverse == ~heartbeat &&
         host->session && host->session < (1u << 21) &&
         host->bpm >= 2000 && host->bpm <= 99900 &&
-        (tempo_u32)(now() - heartbeat) <= TEMPO_LEASE_MS;
+        (tempo_u32)(tick - heartbeat) <= TEMPO_LEASE_MS;
 }
 
 static volatile struct tempo_state *state(void)
@@ -152,7 +157,7 @@ tempo_u8 *tempo_display_values(tempo_u8 *display, const tempo_u8 *source,
 }
 
 /* Called only after the normal foreground UI update returns. Native queueing
-   coalesces an already-pending callback; expiry needs no shared-state write. */
+   coalesces an already-pending callback. */
 void tempo_poll(void)
 {
     struct tempo_host host;
