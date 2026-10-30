@@ -1,3 +1,17 @@
+# Chroma and Ableton tempo fork
+
+This fork is developing Chroma compatibility and bidirectional tempo control for Ableton Live. Knob turns change Live; Live edits update the KeyStep BPM display while stopped or playing. It is not yet ready to install. The upstream installer linked below does not modify Chroma firmware.
+
+- Stack: Python 3.10+, ARM Thumb assembly/C, browser JavaScript; local build and emulator tests.
+- Production: no server or automatic firmware deployment. Device installation is a separate manual approval.
+- Setup: create `.venv` and install `requirements.txt`. Put your own official 2.5.20 package under ignored `firmware/`. See [RUNBOOK.md](RUNBOOK.md).
+- Scope: [execution-brief.md](execution-brief.md). Phase tracking: [PLAN.md](PLAN.md).
+- Preserve upstream history and MIT attribution. Do not commit vendor firmware, derived dumps, personal project backups, or device settings.
+
+The following documentation describes upstream Con. Its original-hardware test claims do not validate this fork on Chroma.
+
+---
+
 # KeyStep Con (KSCON)
 
 Unofficial firmware patch, editor and playable manual for the **Arturia KeyStep Pro**.
