@@ -3,7 +3,7 @@
 Source baseline: upstream 2213071cce1badcea78d02d8b986d3b3542269bc. Official package SHA-256: a01b3d9909182e2b284074469d7bace6862587bfa7ffc2c8730d23aae51dfb32. All work below is offline.
 
 ## Review status
-Build 11 contains the approved corrections and awaits final review follow-up. Do not flash build 9. Independent review identified an execution-context gap; follow-up tracing confirms USB draining runs from a timer interrupt, rather than the foreground context assumed during implementation. That finding is addressed in the build-10 design below. Offline results do not establish physical timing or full-boot RAM ownership.
+Build 11 contains the approved corrections and is cleared by independent final review for presentation as an experimental exact artifact. Separate flash approval and physical tests remain pending. Do not flash build 9. Independent review identified an execution-context gap; follow-up tracing confirms USB draining runs from a timer interrupt, rather than the foreground context assumed during implementation. That finding is addressed in the build-10 design below. Offline results do not establish physical timing or full-boot RAM ownership.
 
 ## Package selection
 The package has separate main and display images for PID 536 and PID 8728. Published upstream build 8 modifies only PID 536 images. PID 8728 selects Chroma. Both display payloads are identical after their separate 64-byte model headers.

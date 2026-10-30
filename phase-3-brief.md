@@ -25,7 +25,7 @@ acceptance:
 assumptions:
   Con scratch gaps remain inherited physical-ownership evidence, not a full-boot proof. Exact 2.5.20 input only. Actual Live beta loading, USB/DIN cable behavior, hardware stack/timing and sequencing remain physical checks.
 blocking:
-  None from user. Independent final-diff review follow-up remains required; physical installation remains separately gated.
+  None from user. Independent Opus final review clears build 11 with no actionable defects. Physical installation remains separately gated.
 routing:
   Pinned Hybrid and prior model-router advisory unchanged. Fable orchestrator e88029d3-efb8-4638-a763-08dfa8b6e480 approved single-writer repair. Current Sol 6.1 high implements. Independent non-author Opus 5.5 high reviewer a94e3e33-3958-4e08-ac5d-a2c79a69e711 follows up on the final diff. No optional fanout or provider switching. Return every actionable finding with severity/file/line and whether build 11 can be presented as experimental for flash approval. Do not modify files or narrate progress.
 
