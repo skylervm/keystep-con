@@ -43,7 +43,7 @@ STOCK_RELEASE = 0x0804E700
 # (99 is above MCC's minimum 2.5.14 compared as numbers or as text); the build byte counts our builds.
 ID_BUILD_IMM, ID_PATCH_IMM = 0x080181D2, 0x080181D8
 PATCH_VERSION = 99
-PATCH_BUILD = 12              # match the stock USB receive object, not the send object
+PATCH_BUILD = 13              # scale tempo timeouts to the application's 100us tick
 VERSION_TEXT_PTR = 0x080589A4  # Utility > FW version text, stock "Firmware version :\n2.5.20\nbuild 2085"
 STOCK_VERSION_TEXT = 0x0805AF3C
 SOURCES = [ROOT / "tools/name_hooks.S", ROOT / "tools/pad_hooks.S", ROOT / "tools/tempo_hooks.S"]

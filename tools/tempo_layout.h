@@ -7,8 +7,10 @@
 #define TEMPO_BPM_ADDRESS (0xC01EF800 + 8)
 #define TEMPO_DRAWN_ADDRESS (0xC01EF800 + 12)
 #define TEMPO_TX_PACKETS 5
-#define TEMPO_LEASE_MS 3000
-#define TEMPO_FRAME_MS 250
+/* The application overrides HAL's initial 1ms SysTick with a 100us period. */
+#define TEMPO_TICKS_PER_MS 10
+#define TEMPO_LEASE_TICKS (3000 * TEMPO_TICKS_PER_MS)
+#define TEMPO_FRAME_TICKS (250 * TEMPO_TICKS_PER_MS)
 
 #ifndef __ASSEMBLER__
 typedef unsigned char tempo_u8;
