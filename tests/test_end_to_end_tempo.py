@@ -35,6 +35,7 @@ class EndToEndTempo(unittest.TestCase):
 
                     def host_to_controller():
                         f.usb(bytes(surface.midi[-1][0]))
+                        f.poll()
                         captured.clear()
                         f.call(entry, DISPLAY)
 

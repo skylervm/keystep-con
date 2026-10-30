@@ -20,7 +20,7 @@ import zipfile
 from pathlib import Path
 
 from boot_logo import patch_ui
-from firmware_models import CHROMA_ADDRESSES, CHROMA_LED_FLUSH_CALLS, DISPLAY_PATHS, MODELS, TEMPO_PATHS, model_address
+from firmware_models import CHROMA_ADDRESSES, CHROMA_LED_FLUSH_CALLS, DISPLAY_PATHS, FOREGROUND_PATHS, MODELS, TEMPO_PATHS, model_address
 from build_names_patch import (
     BASE, FLASH_LIMIT, KSPF, ROOT, SET_DISPATCH, TITLE_CALL, TITLE_FORMATTER,
     decode_thumb_b_w, decode_thumb_bl, elf_text_and_symbols, thumb_branch,
@@ -43,7 +43,7 @@ STOCK_RELEASE = 0x0804E700
 # (99 is above MCC's minimum 2.5.14 compared as numbers or as text); the build byte counts our builds.
 ID_BUILD_IMM, ID_PATCH_IMM = 0x080181D2, 0x080181D8
 PATCH_VERSION = 99
-PATCH_BUILD = 9               # bump for every build that is flashed
+PATCH_BUILD = 10              # corrected IRQ/foreground handoff; build 9 was never flashed
 VERSION_TEXT_PTR = 0x080589A4  # Utility > FW version text, stock "Firmware version :\n2.5.20\nbuild 2085"
 STOCK_VERSION_TEXT = 0x0805AF3C
 SOURCES = [ROOT / "tools/name_hooks.S", ROOT / "tools/pad_hooks.S", ROOT / "tools/tempo_hooks.S"]
@@ -152,6 +152,7 @@ def build(stock_bin: bytes, model: str = "original") -> tuple[bytearray, dict[st
     led_calls = CHROMA_LED_FLUSH_CALLS if model == "chroma" else LED_FLUSH_CALLS
     tempo = MODELS[model]
     paths = TEMPO_PATHS[model]
+    foreground = FOREGROUND_PATHS[model]
     length_word = struct.unpack_from("<I", stock_bin, 4)[0]
     if length_word >> 8 != len(raw) or len(raw) != MODELS[model].payload_size:
         raise SystemExit(f"unexpected 2.5.20 image size: {len(raw):#x}")
@@ -188,7 +189,8 @@ def build(stock_bin: bytes, model: str = "original") -> tuple[bytearray, dict[st
         if site(call) != bytes.fromhex("9df86a60"):
             raise SystemExit(f"encoder dispatch changed at {call:#x}")
     for source, target in ((paths["usb_rx_call"], paths["byte_parser"]),
-                           (paths["boot_call"], paths["sdram_init"])):
+                           (paths["boot_call"], paths["sdram_init"]),
+                           (foreground["call"], foreground["update"])):
         if decode_thumb_bl(source, site(source)) != target:
             raise SystemExit(f"tempo receive/startup call changed at {source:#x}")
     for source, expected, _hook in DISPLAY_PATHS[model]:
@@ -202,7 +204,8 @@ def build(stock_bin: bytes, model: str = "original") -> tuple[bytearray, dict[st
                (addr(SAVE_CALL), at("chord_save"), True), (addr(KEY_SEND_CALL), at("key_send"), True),
                (addr(KEY_REC_CALL), at("key_rec"), True)] + [(c, at("led_flush"), True) for c in led_calls]
     patches += [(tempo.encoder_up, at("tempo_up"), False), (tempo.encoder_down, at("tempo_down"), False),
-                (paths["usb_rx_call"], at("tempo_receive"), True), (paths["boot_call"], at("tempo_boot"), True)]
+                (paths["usb_rx_call"], at("tempo_receive"), True), (paths["boot_call"], at("tempo_boot"), True),
+                (foreground["call"], at("tempo_foreground"), True)]
     for source, target, link in patches:
         patched[source - BASE:source - BASE + 4] = thumb_branch(source, target, link)
         decode = decode_thumb_bl if link else decode_thumb_b_w
@@ -234,6 +237,13 @@ def build(stock_bin: bytes, model: str = "original") -> tuple[bytearray, dict[st
     if sum(out[:64]) & 0xFF or (sum(out[64:]) + out[9]) & 0xFF:
         raise SystemExit("patched checksum mismatch")
     return out, {k: hook_address + v for k, v in symbols.items()}, hook_address
+
+
+def metadata_version(data: bytes) -> bytes:
+    stock = b'"version_number": "2.5.20"'
+    if data.count(stock) != 1:
+        raise ValueError("stock metadata version must match exactly once")
+    return data.replace(stock, f'"version_number": "2.5.{PATCH_VERSION}"'.encode())
 
 
 def main() -> None:
@@ -269,9 +279,7 @@ def main() -> None:
     with zipfile.ZipFile(output_kspf, "w") as archive:
         for item, data in entries:
             if item.filename == "info.json":
-                info = json.loads(data)
-                info["version_number"] = f"2.5.{PATCH_VERSION}"
-                data = json.dumps(info, indent=2).encode() + b"\n"
+                data = metadata_version(data)
             archive.writestr(item, outputs.get(item.filename, data))
     with zipfile.ZipFile(output_kspf) as archive:
         if any(archive.read(name) != data for name, data in outputs.items()) or archive.testzip() is not None:

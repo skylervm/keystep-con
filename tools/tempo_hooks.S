@@ -3,6 +3,7 @@
 .thumb
 .equ TEMPO_BYTE_PARSER, 0x0801a8a6
 .equ TEMPO_SDRAM_INIT, 0x08017c68
+.equ TEMPO_UI_UPDATE, 0x0801f310
 .equ TEMPO_UP_CONT, 0x08012721
 .equ TEMPO_DOWN_CONT, 0x08013bd7
 .equ TEMPO_PROJECT_CONT, 0x08026561
@@ -20,12 +21,30 @@ tempo_receive:
 .size tempo_receive, .-tempo_receive
 
 .balign 4
+.global tempo_foreground
+.type tempo_foreground,%function
+tempo_foreground:
+    push    {r4, lr}
+    call_abs TEMPO_UI_UPDATE
+    push    {r0-r3, r12, lr}
+    mrs     r0, apsr
+    push    {r0, r1}
+    bl      tempo_poll
+    pop     {r0, r1}
+    msr     apsr_nzcvq, r0
+    pop     {r0-r3, r12, lr}
+    pop     {r4, pc}
+.size tempo_foreground, .-tempo_foreground
+
+.balign 4
 .global tempo_boot
 .type tempo_boot,%function
 tempo_boot:
     push    {r4, lr}
     call_abs TEMPO_SDRAM_INIT      @ controller setup and SDRAM commands finish first
     push    {r0-r3, r12, lr}
+    mrs     r3, primask
+    cpsid   i
     ldr     r1, =TEMPO_ADDRESS
     movs    r0, #0
     movs    r2, #TEMPO_BYTES
@@ -35,6 +54,8 @@ tempo_boot:
     ldr     r1, =TEMPO_BPM_ADDRESS
     str     r0, [r1]
     str     r0, [r1, #4]
+    dmb     sy
+    msr     primask, r3
     pop     {r0-r3, r12, lr}
     pop     {r4, pc}
 .size tempo_boot, .-tempo_boot

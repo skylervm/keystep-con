@@ -2,6 +2,7 @@
 from pathlib import Path
 import struct
 import unittest
+from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
 
 from unicorn import Uc, UC_ARCH_ARM, UC_MODE_THUMB, UC_MODE_MCLASS, UC_HOOK_CODE
 from unicorn.arm_const import (
@@ -11,7 +12,8 @@ from unicorn.arm_const import (
     UC_ARM_REG_R8, UC_ARM_REG_R9, UC_ARM_REG_R10, UC_ARM_REG_R11,
     UC_ARM_REG_R12, UC_ARM_REG_SP,
 )
-from firmware_models import MODELS, TEMPO_PATHS, model_address
+from firmware_models import MODELS, TEMPO_PATHS, FOREGROUND_PATHS, model_address
+from build_names_patch import decode_thumb_bl
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE, STOP, STACK = 0x08008000, 0x08007FF0, 0x20070000
@@ -38,6 +40,11 @@ class Fixture:
     def __init__(self, name):
         self.name, self.model, self.paths = name, MODELS[name], TEMPO_PATHS[name]
         self.raw = (ROOT / "firmware/patched" / ("kscon_" + self.model.main_entry)).read_bytes()[64:]
+        site = FOREGROUND_PATHS[name]["call"]
+        wrapper = decode_thumb_bl(site, self.raw[site-BASE:site-BASE+4])
+        self.poll_address = next(int(i.op_str[1:], 16) for i in
+                                 Cs(CS_ARCH_ARM, CS_MODE_THUMB).disasm(self.raw[wrapper-BASE:wrapper-BASE+48], wrapper)
+                                 if i.mnemonic == "bl")
         self.uc = u = Uc(UC_ARCH_ARM, UC_MODE_THUMB | UC_MODE_MCLASS)
         u.mem_map(0x08000000, 0x80000)
         u.mem_write(BASE, self.raw)
@@ -49,9 +56,12 @@ class Fixture:
         self.put(model_address(0x20001800, name), OBJECT)
         self.put(model_address(0x200014B8, name), BUTTONS)
         self.put(self.model.seq_pointer, SEQ)
+        self.put(model_address(0x20001510, name), 0x20030000)
+        u.mem_write(0x2003000C, b"\x60")  # Closed menu: no tempo page selection.
         u.mem_write(SEQ + 0x8E2, b"\x02")
         u.mem_write(BUTTONS + 0x70, b"\x00\x01")
         self.extra_stop = 0
+        self.call_stack = STACK
         self.init_calls = 0
         self.parser_bytes = []
         u.hook_add(UC_HOOK_CODE, self.trace)
@@ -79,16 +89,20 @@ class Fixture:
     def call(self, address, r0=0, r1=0, r2=0, stop=0):
         u = self.uc
         self.extra_stop = stop
-        for reg, value in ((UC_ARM_REG_SP, STACK), (UC_ARM_REG_LR, STOP | 1),
+        stack = self.call_stack
+        for reg, value in ((UC_ARM_REG_SP, stack), (UC_ARM_REG_LR, STOP | 1),
                            (UC_ARM_REG_R0, r0), (UC_ARM_REG_R1, r1), (UC_ARM_REG_R2, r2)):
             u.reg_write(reg, value)
         u.emu_start(address | 1, 0, count=30000)
         assert u.reg_read(UC_ARM_REG_PC) == (stop or STOP), "instruction budget exhausted"
-        assert u.reg_read(UC_ARM_REG_SP) == STACK, "stack changed"
+        assert u.reg_read(UC_ARM_REG_SP) == stack, "stack changed"
         self.extra_stop = 0
 
     def boot(self):
         self.call(self.paths["boot_call"], stop=self.paths["boot_call"] + 4)
+
+    def poll(self):
+        self.call(self.poll_address)
 
     def tap(self, data, stream=None):
         for byte in data:
@@ -187,7 +201,7 @@ class TempoHooks(unittest.TestCase):
                 self.assertEqual(f.turn(), 255)
                 f.tick((0xFFFFFFF0 + 3001) & 0xFFFFFFFF)
                 self.assertEqual(f.turn(), 0)
-                self.assertNotEqual(f.word(LEASE), 0x32504D55)
+                self.assertEqual(f.word(LEASE), 0x32504D55)  # Published state is IRQ-owned; expiry is reader-local.
 
     def test_bad_and_truncated_frames_do_not_renew(self):
         bad = (HEARTBEAT[:-1], HEARTBEAT[:-1] + b"\x00\xf7",

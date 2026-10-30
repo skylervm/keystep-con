@@ -10,7 +10,10 @@ PY="${PYTHON:-python3}"
 "$PY" test_tempo_paths.py
 "$PY" test_tempo_hooks.py
 "$PY" test_display_paths.py
+"$PY" test_foreground_paths.py
 "$PY" test_tempo_feedback.py
+"$PY" test_tempo_concurrency.py
+"$PY" test_package_metadata.py
 "$PY" -m unittest discover -s ../tests -v
 N=$(sed -n 's/^PATCH_BUILD = \([0-9]*\).*/\1/p' build_ksp_patch.py)
 "$PY" -c "import zipfile;z=zipfile.ZipFile('../firmware/patched/KSCON_2.5.99_build$N.kspf');assert z.testzip() is None;print('package ok: firmware/patched/KSCON_2.5.99_build$N.kspf')"

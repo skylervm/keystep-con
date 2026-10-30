@@ -1,14 +1,12 @@
 """Qualify the stock renderer's scratch-slot lifetime before inserting feedback."""
 from pathlib import Path
 import struct
-import subprocess
-import tempfile
 import unittest
 
 from unicorn import UC_HOOK_CODE, UC_HOOK_MEM_READ, UC_HOOK_MEM_WRITE, UC_MEM_WRITE
 from unicorn.arm_const import UC_ARM_REG_LR, UC_ARM_REG_PC, UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3, UC_ARM_REG_SP
-from build_names_patch import decode_thumb_bl, elf_text_and_symbols
-from firmware_models import MODELS, TEMPO_PATHS, model_address
+from build_names_patch import decode_thumb_bl
+from firmware_models import MODELS, model_address
 from test_tempo_hooks import Fixture, BASE, STACK, HEARTBEAT
 
 OWNER, DISPLAY = 0x20030000, 0x20050000
@@ -72,63 +70,30 @@ def setup_renderer(f, stock=True, view=1):
 
 
 class DisplayPaths(unittest.TestCase):
-    def test_native_refresh_from_deeper_rx_context_is_asynchronous(self):
-        # A test-only trampoline adds a full register frame to the actual RX
-        # call chain. It does not alter a firmware artifact or contact hardware.
+    def test_usb_receive_publishes_without_ui_work(self):
         for name in MODELS:
             for page in (0, 1):
                 with self.subTest(model=name, page=page):
                     f = Fixture(name)
                     setup_renderer(f, stock=False, view=page)
-                    for offset in (0x30, 0x44, 0x52, 0x7F):
-                        f.uc.mem_write(OWNER + offset, b"\xa5")
                     before = bytes(f.uc.mem_read(OWNER, 256))
-                    f.uc.mem_write(0x20020000 + 0x8E2, b"\x01")
-                    f.uc.mem_write(0x20020000 + 0xC, b"\0")
-                    site = TEMPO_PATHS[name]["usb_rx_call"]
-                    wrapper = decode_thumb_bl(site, f.raw[site-BASE:site-BASE+4])
-                    c_entry = decode_thumb_bl(wrapper+4, f.raw[wrapper+4-BASE:wrapper+8-BASE])
-                    refresh = model_address(0x0802546C if page == 0 else 0x08025494, name)
-                    assembly = f""".syntax unified
-.thumb
-.text
-push.w {{r0-r12,lr}}
-ldr r0, ={DISPLAY}
-mov.w r1, #-1
-ldr r12, ={refresh | 1}
-blx r12
-pop.w {{r0-r12,lr}}
-ldr pc, ={c_entry | 1}
-.ltorg
-"""
-                    out = Path(__file__).resolve().parents[1] / "out"
-                    out.mkdir(exist_ok=True)
-                    with tempfile.TemporaryDirectory(dir=out) as tmp:
-                        src, obj = Path(tmp)/"probe.S", Path(tmp)/"probe.o"
-                        src.write_text(assembly)
-                        subprocess.run(["clang", "--target=arm-none-eabi", "-mcpu=cortex-m7",
-                                        "-mthumb", "-c", str(src), "-o", str(obj)], check=True)
-                        code, _symbols = elf_text_and_symbols(obj)
-                    trampoline = 0x0807E000
-                    f.uc.mem_write(trampoline, code)
-                    injected, renders, depth = [False], [], [0]
-                    renderers = (0x080264F0, 0x08026624) if name == "original" else (0x080267FC, 0x08026930)
+                    display_before = bytes(f.uc.mem_read(DISPLAY, 512))
+                    calls = []
+                    ui_functions = {model_address(a, name) for a in
+                                    (0x0802546C, 0x08025494, 0x0801FAA0)}
 
-                    def trace(u, address, _size, _data):
-                        depth[0] = max(depth[0], STACK-u.reg_read(UC_ARM_REG_SP))
-                        if address in renderers:
-                            renders.append(address)
-                        if address == c_entry and u.reg_read(UC_ARM_REG_R1) == 0xF7 and not injected[0]:
-                            injected[0] = True
-                            u.reg_write(UC_ARM_REG_PC, trampoline | 1)
+                    def trace(_u, address, _size, _data):
+                        if address in ui_functions:
+                            calls.append(address)
 
                     f.uc.hook_add(UC_HOOK_CODE, trace)
                     f.usb(HEARTBEAT)
-                    self.assertTrue(injected[0])
-                    self.assertEqual(renders, [])
+                    self.assertEqual(calls, [])
                     self.assertEqual(bytes(f.uc.mem_read(OWNER, 256)), before)
-                    self.assertIn(renderers[page] | 1, (f.word(DISPLAY+0x10), f.word(DISPLAY+0x28)))
-                    self.assertLess(depth[0], 1024)
+                    self.assertEqual(bytes(f.uc.mem_read(DISPLAY, 512)), display_before)
+                    self.assertEqual(f.word(0xC01EF80C), 0)
+                    f.poll()
+                    self.assertEqual(len(calls), 1)
 
     def test_native_refresh_only_queues_without_touching_edit_state(self):
         for name in MODELS:

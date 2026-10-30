@@ -14,7 +14,35 @@ typedef void (*page_fn)(tempo_u8 *);
 typedef void (*timed_page_fn)(tempo_u8 *, tempo_u32);
 
 static tempo_u32 now(void) { return ((get_tick_fn)0x0803E441)(); }
-static tempo_u32 leased(volatile struct tempo_state *s);
+struct tempo_host { tempo_u32 session, bpm; };
+
+static tempo_u32 irq_save(void)
+{
+    tempo_u32 mask;
+    __asm__ volatile ("mrs %0, primask\n\tcpsid i" : "=r"(mask) :: "memory");
+    return mask;
+}
+
+static void irq_restore(tempo_u32 mask)
+{
+    __asm__ volatile ("dmb sy\n\tmsr primask, %0" :: "r"(mask) : "memory");
+}
+
+/* The timer IRQ is the only publisher. Readers copy words, then release IRQs
+   before validation, formatting, USB sends or any native UI operation. */
+static tempo_u32 snapshot(struct tempo_host *host)
+{
+    volatile struct tempo_state *s = (volatile struct tempo_state *)TEMPO_ADDRESS;
+    tempo_u32 mask = irq_save();
+    tempo_u32 magic = s->magic, heartbeat = s->heartbeat, inverse = s->heartbeat_inverse;
+    host->session = s->session;
+    host->bpm = HOST_BPM;
+    irq_restore(mask);
+    return magic == TEMPO_ACTIVE && inverse == ~heartbeat &&
+        host->session && host->session < (1u << 21) &&
+        host->bpm >= 2000 && host->bpm <= 99900 &&
+        (tempo_u32)(now() - heartbeat) <= TEMPO_LEASE_MS;
+}
 
 static volatile struct tempo_state *state(void)
 {
@@ -38,7 +66,7 @@ static tempo_u32 read16(const tempo_u8 *bytes)
     return bytes[0] | ((tempo_u32)bytes[1] << 8);
 }
 
-static void queue_visible_bpm(tempo_u32 force)
+static void queue_visible_bpm(tempo_u32 bpm, tempo_u32 force)
 {
     tempo_u8 *ui = UI, *display = DISPLAY;
     if (!ui || !display || ui[0xC] > 1) return;
@@ -46,7 +74,7 @@ static void queue_visible_bpm(tempo_u32 force)
     const tempo_u8 *record = ui + (page ? 0x20 : 0x1A);
     if (record[0] != (tempo_u32)PROJECT + 1) return;
     tempo_u32 cache = read16(display + (page ? 0x118 : 0x112));
-    if (!force && DRAWN_BPM == HOST_BPM && cache == (HOST_BPM & 0xFFFF)) return;
+    if (!force && DRAWN_BPM == bpm && cache == (bpm & 0xFFFF)) return;
     /* Queue only. Page-selection helpers would clear other cached edit flags. */
     if (page) ((timed_page_fn)0x08025495)(display, (tempo_u32)-1);
     else ((page_fn)0x0802546D)(display);
@@ -55,7 +83,9 @@ static void queue_visible_bpm(tempo_u32 force)
 void tempo_receive_byte(tempo_u8 *parser, tempo_u32 byte)
 {
     /* Only the buffered USB parser is tapped. Also reject an unknown object. */
-    if (byte >= 0xF8 || !MIDI_OBJECT || parser != MIDI_OBJECT + 0x164) return;
+    /* Reset clears this internal-RAM pointer. Its constructor runs after SDRAM
+       setup/our boot clear. Reject early IRQ traffic without touching SDRAM. */
+    if (byte >= 0xF8 || !UI || !MIDI_OBJECT || parser != MIDI_OBJECT + 0x164) return;
     volatile struct tempo_state *s = state();
     tempo_u32 tick = now();
     if (byte == 0xF0) {
@@ -76,18 +106,14 @@ void tempo_receive_byte(tempo_u8 *parser, tempo_u32 byte)
         if (!enabled) {
             if (session == s->session) {
                 s->magic = TEMPO_MAGIC;
-                if (DRAWN_BPM) queue_visible_bpm(1);
             }
             return;
         }
-        tempo_u32 changed = bpm != HOST_BPM || session != s->session;
-        if (session != s->session) DRAWN_BPM = 0;
         s->session = session;
         HOST_BPM = bpm;
         s->heartbeat = tick;
         s->heartbeat_inverse = ~tick;
         s->magic = TEMPO_ACTIVE;
-        queue_visible_bpm(changed);
         return;
     }
     if (byte >= 0x80 || s->rx_pos >= 13) { s->rx_pos = 0; return; }
@@ -105,13 +131,14 @@ tempo_u8 *tempo_display_values(tempo_u8 *display, const tempo_u8 *source,
                               tempo_u8 *record, tempo_u32 *values, tempo_u32 cache_offset)
 {
     tempo_u32 stock = read16(source + 2);
-    if (!leased(state()) || source[0] != (tempo_u32)PROJECT + 1) {
+    struct tempo_host host;
+    if (!snapshot(&host) || source[0] != (tempo_u32)PROJECT + 1) {
         values[0] = DRAWN_BPM ? stock ^ 1 : read16(display + cache_offset);
         values[1] = stock;
         DRAWN_BPM = 0;             /* Force one stock redraw when leaving host mode. */
         return (tempo_u8 *)source;
     }
-    tempo_u32 bpm = HOST_BPM, cached = DRAWN_BPM;
+    tempo_u32 bpm = host.bpm, cached = DRAWN_BPM;
     if (read16(display + cache_offset) != (cached & 0xFFFF)) cached = 0;
     values[0] = cached;
     values[1] = bpm;
@@ -124,14 +151,13 @@ tempo_u8 *tempo_display_values(tempo_u8 *display, const tempo_u8 *source,
     return record;
 }
 
-static tempo_u32 leased(volatile struct tempo_state *s)
+/* Called only after the normal foreground UI update returns. Native queueing
+   coalesces an already-pending callback; expiry needs no shared-state write. */
+void tempo_poll(void)
 {
-    if (s->magic != TEMPO_ACTIVE) return 0;
-    if (s->heartbeat_inverse == ~s->heartbeat &&
-        s->session && s->session < (1u << 21) && HOST_BPM >= 2000 && HOST_BPM <= 99900 &&
-        (tempo_u32)(now() - s->heartbeat) <= TEMPO_LEASE_MS) return 1;
-    s->magic = TEMPO_MAGIC;
-    return 0;
+    struct tempo_host host;
+    tempo_u32 active = snapshot(&host);
+    if (active || DRAWN_BPM) queue_visible_bpm(host.bpm, !active);
 }
 
 static void send_turn(tempo_u32 session, tempo_u32 flags, tempo_u32 magnitude)
@@ -157,12 +183,12 @@ static void send_turn(tempo_u32 session, tempo_u32 flags, tempo_u32 magnitude)
 tempo_u32 tempo_turn(const tempo_u8 *frame, tempo_u32 direction)
 {
     if (frame[0x6A] != 0) return frame[0x6A];
-    volatile struct tempo_state *s = state();
-    if (!leased(s)) return frame[0x6A];
+    struct tempo_host host;
+    if (!snapshot(&host)) return frame[0x6A];
     tempo_u32 magnitude = frame[0x6B];
     if (magnitude) {
         tempo_u32 fine = BUTTONS && ((held_fn)0x0804AEBB)(BUTTONS, 1);
-        send_turn(s->session, (direction & 1) | (fine ? 2 : 0), magnitude);
+        send_turn(host.session, (direction & 1) | (fine ? 2 : 0), magnitude);
         if (UI) ((page_fn)0x0801FAA1)(UI);  /* Preserve the knob's native screen/menu guards. */
     }
     return 0xFF;                   /* stock dispatch drops a consumed event */

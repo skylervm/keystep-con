@@ -31,6 +31,7 @@ class TempoFeedback(unittest.TestCase):
                         project_before = bytes(f.uc.mem_read(SEQ, 0x2000))
                         calls = observe_refreshes(f)
                         f.usb(heartbeat(bpm=bpm))
+                        f.poll()
                         self.assertEqual(len(calls), 1)
                         f.call(entry, DISPLAY)
                         expected = f"{bpm // 100}.{bpm % 100:02d} BPM"
@@ -40,6 +41,7 @@ class TempoFeedback(unittest.TestCase):
                         self.assertEqual(bytes(f.uc.mem_read(source + 2, 2)), b"\xe0\x2e")  # Still 120.00.
                         captured.clear()
                         f.usb(heartbeat(bpm=bpm))
+                        f.poll()
                         self.assertEqual(len(calls), 1, "equal heartbeat requeued a painted value")
                         f.call(entry, DISPLAY)
                         self.assertFalse(any(kind == "bpm" for kind, _text in captured))
@@ -55,10 +57,12 @@ class TempoFeedback(unittest.TestCase):
                         before = bytes(f.uc.mem_read(OWNER, 256))
                         calls = observe_refreshes(f)
                         f.usb(heartbeat(bpm=14550))
+                        f.poll()
                         self.assertEqual(calls, [])
                         self.assertEqual(bytes(f.uc.mem_read(OWNER, 256)), before)
                         f.uc.mem_write(OWNER + 0xC, bytes([view]))
                         f.usb(heartbeat(bpm=14550))
+                        f.poll()
                         self.assertEqual(len(calls), 1)
                         f.call(entry, DISPLAY)
                         self.assertIn(("bpm", "145.50 BPM"), captured)
@@ -71,16 +75,45 @@ class TempoFeedback(unittest.TestCase):
                         f = Fixture(name)
                         entry, _source, captured = setup_renderer(f, stock=False, view=view)
                         f.usb(heartbeat(bpm=77536))  # Its low word equals stock's 12000.
+                        f.poll()
                         f.call(entry, DISPLAY)
                         self.assertIn(("bpm", "775.36 BPM"), captured)
                         captured.clear()
                         if disable:
                             f.usb(heartbeat(enabled=0, bpm=77536))
+                            f.poll()
                         else:
                             f.tick(13001)
+                            f.poll()
                         f.call(entry, DISPLAY)
                         self.assertIn(("bpm", "120 BPM" if view == 0 else "120.00 BPM"), captured)
                         self.assertEqual(f.word(0xC01EF80C), 0)
+
+    def test_silent_expiry_is_queued_by_foreground_poll_and_draws_stock(self):
+        for name in MODELS:
+            for view in (0, 1):
+                with self.subTest(model=name, view=view):
+                    f = Fixture(name)
+                    entry, _source, captured = setup_renderer(f, stock=False, view=view)
+                    calls = observe_refreshes(f)
+                    f.usb(heartbeat(bpm=13300))
+                    self.assertEqual(calls, [], "RX queued a display call")
+                    f.poll()
+                    pending = bytes(f.uc.mem_read(DISPLAY, 0x40))
+                    f.poll()
+                    self.assertEqual(bytes(f.uc.mem_read(DISPLAY, 0x40)), pending,
+                                     "duplicate poll changed the native pending callback")
+                    f.call(entry, DISPLAY)
+                    captured.clear()
+                    calls.clear()
+                    f.tick(13001)
+                    f.poll()  # No disable frame and no forced renderer call yet.
+                    self.assertEqual(len(calls), 1, "expiry did not request a redraw")
+                    f.call(entry, DISPLAY)
+                    self.assertIn(("bpm", "120 BPM" if view == 0 else "120.00 BPM"), captured)
+                    calls.clear()
+                    f.poll()
+                    self.assertEqual(calls, [], "painted stock value was requeued")
 
     def test_other_project_preview_keeps_its_stock_tempo(self):
         for name in MODELS:
@@ -90,6 +123,7 @@ class TempoFeedback(unittest.TestCase):
                 f.uc.mem_write(source, b"\x02")
                 calls = observe_refreshes(f)
                 f.usb(heartbeat(bpm=14725))
+                f.poll()
                 self.assertEqual(calls, [])
                 f.call(entry, DISPLAY)
                 self.assertIn(("bpm", "120 BPM"), captured)
@@ -101,11 +135,14 @@ class TempoFeedback(unittest.TestCase):
                     f = Fixture(name)
                     entry, _source, captured = setup_renderer(f, stock=False, view=view)
                     f.usb(heartbeat(bpm=13300))
+                    f.poll()
                     f.call(entry, DISPLAY)
                     f.usb(heartbeat(enabled=0, bpm=13300))
+                    f.poll()
                     f.call(entry, DISPLAY)
                     captured.clear()
                     f.usb(heartbeat(session=SESSION + 1, bpm=13300))
+                    f.poll()
                     f.call(entry, DISPLAY)
                     self.assertIn(("bpm", "133.00 BPM"), captured)
 

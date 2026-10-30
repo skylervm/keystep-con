@@ -2,8 +2,8 @@
 
 Source baseline: upstream 2213071cce1badcea78d02d8b986d3b3542269bc. Official package SHA-256: a01b3d9909182e2b284074469d7bace6862587bfa7ffc2c8730d23aae51dfb32. All work below is offline.
 
-## Review hold
-Do not flash build 9. Independent review identified an execution-context gap; follow-up tracing confirms USB draining runs from a timer interrupt, rather than the foreground context assumed during implementation. The RX display-queue call and multiword lease publication need a concurrency-safe design before approval. Offline happy-path tests do not establish interrupt safety.
+## Review status
+Build 10 contains the approved corrections and awaits independent follow-up review. Do not flash build 9. Independent review identified an execution-context gap; follow-up tracing confirms USB draining runs from a timer interrupt, rather than the foreground context assumed during implementation. That finding is addressed in the build-10 design below. Offline results do not establish physical timing or full-boot RAM ownership.
 
 ## Package selection
 The package has separate main and display images for PID 536 and PID 8728. Published upstream build 8 modifies only PID 536 images. PID 8728 selects Chroma. Both display payloads are identical after their separate 64-byte model headers.
@@ -53,6 +53,16 @@ USB execution context is NOT foreground. Exact stock call chains:
 - The wrapper passes timer handle 0x2000168C / 0x20001690. The callback selects that handle before draining USB.
 - By contrast, the encoder event worker 0x08012338 / 0x0801254C is called from main application code at 0x08016954 / 0x08016B04 (and later main-loop sites). The original reset/application chain was traced during boot qualification.
 
-These image facts invalidate the prior single-context assumption. No runtime fix has been applied. The review hold remains while the user decides on the review-driven behavioral change. The package and Live bridge are not installed.
+These image facts invalidate the prior single-context assumption. The user approved addressing the findings. Build 10 now separates IRQ publication and foreground UI work, as described below. The package and Live bridge are not installed.
 
-Known display limitation: silent lease expiry does not schedule an idle repaint. A stale host BPM may remain visible until a native redraw or knob turn. Explicit disable does queue repaint. The physical checklist must cover silent loss without forcing a renderer call.
+Build-9 limitation, corrected in build 10: silent lease expiry previously did not schedule an idle repaint. The foreground poll now schedules the visible stock BPM view on expiry as well as explicit disable. The offline test requests the redraw before manually invoking any renderer; physical confirmation is still required.
+
+
+## Build 10 ownership and follow-up evidence
+- RX is the sole publisher of the 28-byte parser/host state and host BPM. It does not queue UI work or write DRAWN_BPM. Each foreground reader copies the five published words with the previous PRIMASK saved, interrupts disabled, and the previous mask restored after a memory barrier. Validity/expiry is computed on that copy without modifying shared state. IRQ critical sections contain no UI, formatting or USB work.
+- A guarded BL at original 0x08016976 / Chroma 0x08016B20 wraps the real periodic UI update (0x0801F310 / 0x0801F49C). Polling runs after the full native call; its return registers/flags and prior mask are preserved. Native main-loop backedges call it repeatedly while stopped/playing and in BPM, popup and menu states in the emulator. Event scanning and physical LED I/O are stubbed in that qualification; the UI update itself runs natively.
+- Native queued BPM renderers are exercised through the main-application queue consumer at 0x08016ACC / 0x08016C76, returning at 0x08016B00 / 0x08016CAA. The queue coalesces repeated requests without changing an already-pending task, so polling cannot postpone its render. Rendering happens in the subsequent native queue pass.
+- Reset data/BSS code is executed through its first hardware-init call and proves the internal-RAM UI pointer starts at zero. Its native constructor has its sole direct call at 0x0801655E / 0x08016750, after SDRAM initialization returns at 0x08016486 / 0x08016682. Timer-start writes occur later at 0x080167DA / 0x08016994. RX additionally checks this native ready pointer before touching external RAM. An explicit test unmaps all SDRAM and feeds a real USB heartbeat while the pointer is null. This guard does not rely on unproven NVIC-enable timing.
+- Instruction-boundary tests suspend foreground execution, save CPU context, run the full native USB receive/drain on a separate IRQ stack, then resume it. Both models pass all 608 unmasked C boundaries across polling, the knob hook and both renderers. Snapshots contain a coherent old or new token/BPM pair; RX does not change UI owner/queue/cache. Already-masked entry remains masked. This models preemption; it is not a hardware NVIC timing test.
+- Metadata is now a single checked version-string byte replacement. A test reverses just that replacement and requires byte-for-byte equality with stock info.json. Build 9 is superseded and was never flashed.
+- Whole build verification passes both complete Con model suites, 9 stock-path probes, 7 hook tests, 3 renderer tests, 4 foreground tests, 6 feedback tests, 3 concurrency tests, the metadata test, 14 fake-Live/integration tests and 7 installer checks. Physical timing, actual stack headroom, original-model hardware and scratch ownership remain the stated device limitations.
