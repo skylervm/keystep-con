@@ -1,7 +1,7 @@
 /* USB-only relative tempo control. Original-model addresses are mapped at build time. */
 #include "tempo_layout.h"
 #define USB_QUEUE ((volatile tempo_u32 *)0x20004F14)
-#define MIDI_OBJECT (*(tempo_u8 *volatile *)0x20001800)
+#define USB_RX_OBJECT (*(tempo_u8 *volatile *)0x200014C8)
 #define BUTTONS (*(tempo_u8 *volatile *)0x200014B8)
 #define HOST_BPM (*(volatile tempo_u32 *)TEMPO_BPM_ADDRESS)
 #define DRAWN_BPM (*(volatile tempo_u32 *)TEMPO_DRAWN_ADDRESS)
@@ -88,9 +88,9 @@ static void queue_visible_bpm(tempo_u32 bpm, tempo_u32 force)
 void tempo_receive_byte(tempo_u8 *parser, tempo_u32 byte)
 {
     /* Only the buffered USB parser is tapped. Also reject an unknown object. */
-    /* Reset clears this internal-RAM pointer. Its constructor runs after SDRAM
+    /* Reset clears UI's internal-RAM pointer. Its constructor runs after SDRAM
        setup/our boot clear. Reject early IRQ traffic without touching SDRAM. */
-    if (byte >= 0xF8 || !UI || !MIDI_OBJECT || parser != MIDI_OBJECT + 0x164) return;
+    if (byte >= 0xF8 || !UI || !USB_RX_OBJECT || parser != USB_RX_OBJECT + 0x164) return;
     volatile struct tempo_state *s = state();
     tempo_u32 tick = now();
     if (byte == 0xF0) {
