@@ -38,7 +38,7 @@ static tempo_u32 snapshot(struct tempo_host *host)
     host->session = s->session;
     host->bpm = HOST_BPM;
     tempo_u32 tick = now();  /* Plain RAM getter; still inside the short mask. */
-    if (magic == TEMPO_ACTIVE && (tempo_u32)(tick - heartbeat) > TEMPO_LEASE_MS) {
+    if (magic == TEMPO_ACTIVE && (tempo_u32)(tick - heartbeat) > TEMPO_LEASE_TICKS) {
         s->magic = TEMPO_MAGIC;  /* Latch expiry so a full tick wrap cannot revive it. */
         magic = TEMPO_MAGIC;
     }
@@ -46,7 +46,7 @@ static tempo_u32 snapshot(struct tempo_host *host)
     return magic == TEMPO_ACTIVE && inverse == ~heartbeat &&
         host->session && host->session < (1u << 21) &&
         host->bpm >= 2000 && host->bpm <= 99900 &&
-        (tempo_u32)(tick - heartbeat) <= TEMPO_LEASE_MS;
+        (tempo_u32)(tick - heartbeat) <= TEMPO_LEASE_TICKS;
 }
 
 static volatile struct tempo_state *state(void)
@@ -99,7 +99,7 @@ void tempo_receive_byte(tempo_u8 *parser, tempo_u32 byte)
         return;
     }
     if (!s->rx_pos) return;
-    if ((tempo_u32)(tick - s->rx_tick) > TEMPO_FRAME_MS) { s->rx_pos = 0; return; }
+    if ((tempo_u32)(tick - s->rx_tick) > TEMPO_FRAME_TICKS) { s->rx_pos = 0; return; }
     if (byte == 0xF7) {
         tempo_u8 pos = s->rx_pos;
         s->rx_pos = 0;

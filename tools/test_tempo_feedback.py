@@ -5,6 +5,7 @@ from unicorn import UC_HOOK_CODE
 from firmware_models import MODELS, model_address
 from test_tempo_hooks import Fixture, heartbeat, SESSION, SEQ
 from test_display_paths import setup_renderer, OWNER, DISPLAY
+from test_tempo_paths import application_tick_us
 
 
 def observe_refreshes(f):
@@ -20,6 +21,28 @@ def observe_refreshes(f):
 
 
 class TempoFeedback(unittest.TestCase):
+    def test_host_display_holds_until_true_three_second_expiry(self):
+        for name in MODELS:
+            for view in (0, 1):
+                with self.subTest(model=name, view=view):
+                    f = Fixture(name)
+                    entry, _source, captured = setup_renderer(f, stock=False, view=view)
+                    tick_us = application_tick_us(f.model)
+                    f.usb(heartbeat(bpm=13650))
+                    for elapsed_us in (0, 1162000, 2999000, 3000000):
+                        f.tick(10000 + elapsed_us // tick_us)
+                        f.poll()
+                        # Invalidate the native painted-value cache to exercise redraw.
+                        f.uc.mem_write(DISPLAY + (0x118 if view else 0x112), b"\0\0")
+                        captured.clear()
+                        f.call(entry, DISPLAY)
+                        self.assertIn(("bpm", "136.50 BPM"), captured)
+                    f.tick(10000 + 3000000 // tick_us + 1)
+                    f.poll()
+                    captured.clear()
+                    f.call(entry, DISPLAY)
+                    self.assertIn(("bpm", "120.00 BPM" if view else "120 BPM"), captured)
+
     def test_host_value_renders_without_changing_project_or_menu_data(self):
         for name in MODELS:
             for view in (0, 1):
@@ -83,7 +106,7 @@ class TempoFeedback(unittest.TestCase):
                             f.usb(heartbeat(enabled=0, bpm=77536))
                             f.poll()
                         else:
-                            f.tick(13001)
+                            f.tick(40001)
                             f.poll()
                         f.call(entry, DISPLAY)
                         self.assertIn(("bpm", "120 BPM" if view == 0 else "120.00 BPM"), captured)
@@ -106,7 +129,7 @@ class TempoFeedback(unittest.TestCase):
                     f.call(entry, DISPLAY)
                     captured.clear()
                     calls.clear()
-                    f.tick(13001)
+                    f.tick(40001)
                     f.poll()  # No disable frame and no forced renderer call yet.
                     self.assertEqual(len(calls), 1, "expiry did not request a redraw")
                     f.call(entry, DISPLAY)

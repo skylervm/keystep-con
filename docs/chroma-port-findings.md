@@ -3,7 +3,7 @@
 Source baseline: upstream 2213071cce1badcea78d02d8b986d3b3542269bc. Official package SHA-256: a01b3d9909182e2b284074469d7bace6862587bfa7ffc2c8730d23aae51dfb32. Offline qualification and subsequent Chroma device checks are distinguished below.
 
 ## Review status
-Build 11 is installed on Chroma, where physical testing exposed the receive-object mismatch described below. Build 12 corrects that mismatch and is not installed. Do not flash superseded builds. Independent review identified an execution-context gap; follow-up tracing confirms USB draining runs from a timer interrupt, rather than the foreground context assumed during implementation. That finding is addressed in the build-10 design below. Offline results do not establish physical timing or full-boot RAM ownership.
+Build 12 is installed on Chroma. It corrects the receive-object mismatch but physical testing exposed the timeout-scale error described below. Build 13 corrects that scale and is not installed. Do not flash superseded builds. Independent review identified an execution-context gap; follow-up tracing confirms USB draining runs from a timer interrupt, rather than the foreground context assumed during implementation. That finding is addressed in the build-10 design below. Offline results do not establish physical timing or full-boot RAM ownership.
 
 ## Package selection
 The package has separate main and display images for PID 536 and PID 8728. Published upstream build 8 modifies only PID 536 images. PID 8728 selects Chroma. Both display payloads are identical after their separate 64-byte model headers.
@@ -22,13 +22,13 @@ Clock-mode getter: original 0x0802AA62, Chroma 0x0802AEA6. It reads sequencer +0
 
 USB-only raw packet enqueue: original 0x0801A49C, Chroma 0x0801A5F8. Its ring is original 0x20004F14, Chroma 0x20004F34. The real enqueue and converter preserve USB-MIDI SysEx packets, and the probe observes writes only to that ring and the stack. The consumer submits four-byte USB-MIDI packets to endpoint 0x81 (Chroma 0x0801A804..0x0801A80A). This is separate from the DIN queues. Multi-packet SysEx must reserve capacity atomically so a full ring cannot emit a partial frame.
 
-Tick getter: original 0x0803E440, Chroma 0x0803E9A0. Tick RAM is original 0x20006218, Chroma 0x20006238. The real getter reads the sentinel in the probe. A second probe runs the actual tick initializer and incrementer: with 216 MHz core clock and frequency byte 1, SysTick reload is 215999, control is 7, and each increment adds one millisecond. Both model images pass. Do not use 0x20000010/14: those addresses contain scale data/inactivity configuration, not the tick.
+Tick getter: original 0x0803E440, Chroma 0x0803E9A0. Tick RAM is original 0x20006218, Chroma 0x20006238. The real getter reads the sentinel in the probe. The early HAL initializer uses 1ms ticks, but the application clock setup subsequently overrides SysTick to HCLK/10000, producing 100us raw ticks. The initial probe missed that override. Build-13 qualification executes each complete native application clock setup through its return, including clock-source selection and NVIC calls. Only hardware clock/power setup and the pinned HCLK getter are stubbed. It checks the application-entry caller and SysTick target against HAL, and confirms 100us periods at two HCLK rates. The native UI also divides the raw counter by ten before applying millisecond deadlines. Do not use 0x20000010/14: those addresses contain scale data/inactivity configuration, not the tick.
 
 ## Current tests
 `test_tempo_paths.py` passes both variants, directions, clock modes and stopped/playing state fixtures. `test_model_hooks.py --model original` and `--model chroma` pass the full upstream pad, name and SysEx chord-save emulator assertions. The adapter changes model constants, not assertions, and runs the real mapped firmware routines where upstream tests run them. It retains upstream hardware stubs; success is not physical-device validation.
 
 ## Limits
-Build 11 is installed on Chroma only; build 12 awaits separate approval and physical testing. Scratch RAM at 0xC01EF800..0xC01F0000 is inherited from Con; a separate public patch project reports both-model boot/workload observations covering the surrounding free region. Those observations are author-reported, not our own full-boot or physical-memory ownership proof. Physical tests are still required. No vendor firmware, derived binary dumps, or personal backups belong in Git.
+Build 12 is installed on Chroma only; build 13 awaits separate approval and physical testing. Scratch RAM at 0xC01EF800..0xC01F0000 is inherited from Con; a separate public patch project reports both-model boot/workload observations covering the surrounding free region. Those observations are author-reported, not our own full-boot or physical-memory ownership proof. Physical tests are still required. No vendor firmware, derived binary dumps, or personal backups belong in Git.
 
 
 ## Bidirectional tempo and display
@@ -41,7 +41,7 @@ Feedback queues an already-visible BPM page through native asynchronous queue pr
 ## Verification scope
 The build script runs both complete upstream Con emulator suites using explicit model constants, stock path probes, tempo/parser/queue tests, both native renderer probes, feedback tests, fake-Live transport tests and an integrated firmware-to-bridge-to-display test stopped/playing. A headless browser reconstructs exactly the locally built firmware package from the official input. These tests never grant Web MIDI permissions or contact the device.
 
-Live 12.4.25b1 loaded bridge v2.0, build 11 was identified on Chroma, all 158 global settings matched the pre-flash snapshot, and physical transport reached the bridge. The tempo test failed as described below. Build 12 is not installed. Physical USB/display timing, sequencing and full-boot scratch ownership still require device checks. The public free-memory observations cited above are contextual evidence, not our own physical proof.
+Live 12.4.25b1 loaded bridge v2.0, build 11 was identified on Chroma, all 158 global settings matched the pre-flash snapshot, and physical transport reached the bridge. The tempo test failed as described below. Build 12 is installed but tempo control is intermittent. Build 13 is not installed. Physical USB/display timing, sequencing and full-boot scratch ownership still require device checks. The public free-memory observations cited above are contextual evidence, not our own physical proof.
 
 
 ## Post-review evidence
@@ -53,7 +53,7 @@ USB execution context is NOT foreground. Exact stock call chains:
 - The wrapper passes timer handle 0x2000168C / 0x20001690. The callback selects that handle before draining USB.
 - By contrast, the encoder event worker 0x08012338 / 0x0801254C is called from main application code at 0x08016954 / 0x08016B04 (and later main-loop sites). The original reset/application chain was traced during boot qualification.
 
-These image facts invalidate the prior single-context assumption. The user approved addressing the findings. Build 10 separated IRQ publication and foreground UI work, as described below; that design is retained in installed build 11 and the uninstalled build-12 candidate. The Live bridge is installed and loaded.
+These image facts invalidate the prior single-context assumption. The user approved addressing the findings. Build 10 separated IRQ publication and foreground UI work, as described below; that design is retained in installed build 12 and the uninstalled build-13 candidate. The Live bridge is installed and loaded.
 
 Build-9 limitation, corrected in build 10: silent lease expiry previously did not schedule an idle repaint. The foreground poll now schedules the visible stock BPM view on expiry as well as explicit disable. The offline test requests the redraw before manually invoking any renderer; physical confirmation is still required.
 
@@ -69,7 +69,7 @@ Build-9 limitation, corrected in build 10: silent lease expiry previously did no
 
 
 ## Build 11 expiry-wrap correction
-Review cleared all five original items, then identified a low-severity edge: an expired active marker could look fresh again after a full 32-bit millisecond tick wrap. Snapshot now reads the plain RAM tick getter and latches expiry by clearing only the active marker while interrupts remain masked. IRQ publication and the conditional foreground expiry clear are serialized; parser, token and BPM remain RX-owned. Validation/formatting/UI work remains outside the mask. A regression advances through expiry and then to the same tick value one full wrap later, confirms stock knob handling, and verifies a fresh heartbeat enables control again. Prior mask preservation is checked for both entry states.
+Review cleared all five original items, then identified a low-severity edge: an expired active marker could look fresh again after a full 32-bit raw tick wrap. Snapshot now reads the plain RAM tick getter and latches expiry by clearing only the active marker while interrupts remain masked. IRQ publication and the conditional foreground expiry clear are serialized; parser, token and BPM remain RX-owned. Validation/formatting/UI work remains outside the mask. A regression advances through expiry and then to the same tick value one full wrap later, confirms stock knob handling, and verifies a fresh heartbeat enables control again. Prior mask preservation is checked for both entry states.
 
 The native UI wrapper comparison additionally watches stack reads throughout the stock update/callees and proves neither model reads caller stack arguments in the exercised native path. This closes the review's residual stack-argument question offline. Physical stack headroom remains a separate limitation.
 
@@ -94,5 +94,46 @@ It now decodes the object pointer from the hash-verified stock image, pins the
 stock drain-call destination, and checks that the candidate retains those caller
 instructions. It keeps the unrelated send object distinct and runs the native
 load instructions before draining USB. This regression fails against build 11 for
-both models and passes with the corrected guard. Physical tempo/display confirmation still requires
-separate approval and installation of the exact replacement candidate.
+both models and passes with the corrected guard. Physical build-12 testing subsequently exposed the
+clock-unit error described below.
+
+## Application clock units and build 13
+
+Build 12 was read back on Chroma with all 158 global settings unchanged. The
+physical display alternated between local 120 BPM and host 136.50 BPM. Of about
+five slow turns, one custom turn reached Live and raised it to 137.50 BPM; Stop
+arrived. An unchanged relay captured host updates about 1.1 seconds apart, with
+a maximum observed gap of 1.161 seconds and no CoreMIDI forwarding errors.
+
+The application entry calls clock setup at original 0x08017B44 / Chroma
+0x08017CA0 after HAL initialization. Its SysTick configuration calls are original
+0x08017C06 / Chroma 0x08017D62. The native HCLK/10000 calculation yields 100us
+ticks, overriding the earlier HAL HCLK/1000 setup. The old 3000-raw-tick lease
+therefore lasted 0.3 seconds. Build 13 scales the intended three-second lease to
+30000 raw ticks and the 250ms frame deadline to 2500 raw ticks. Raw unsigned
+subtraction and latched expiry remain in place, preserving counter-wrap handling.
+
+The new heartbeat-spacing regression derives time from the native application
+configuration and reproduces build 12's premature expiry on both models. It
+checks repeated 1.162-second update spacing and the true three-second boundary.
+Fragmented-frame tests cover 200ms acceptance and expiry beyond 250ms. The Live
+bridge is unchanged. Physical build-13 validation requires separate exact-artifact
+approval.
+
+## Build 13 review follow-up
+
+The clock proof now runs through setup return and checks stack restoration. A
+whole-image BL/B.W direct-call audit pins every SysTick-configuration, HAL tick-init
+and RCC clock-configuration caller. The alternative 1ms clock setup is called only by
+the USB low-power resume branch. Native USB initialization sets its low-power
+flag to zero even after the handle is filled with nonzero test data. The normal
+resume path is executed with that native configuration
+and leaves the SysTick source and reload unchanged on both models. This qualifies
+the normal stock configuration, not arbitrary indirect writes or modified input
+firmware. Exact stock-image hashes remain required.
+
+Both native BPM renderers are forced to redraw at the observed 1.162-second gap,
+at 2.999 seconds and exactly three seconds after a heartbeat. They retain the
+host BPM and return to stock only beyond the three-second lease. The frame test
+also accepts a complete frame exactly at 250ms and rejects it one tick later.
+These changes affect tests and evidence only; the build-13 firmware is unchanged.

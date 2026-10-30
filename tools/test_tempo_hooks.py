@@ -14,6 +14,7 @@ from unicorn.arm_const import (
 )
 from firmware_models import MODELS, TEMPO_PATHS, FOREGROUND_PATHS, model_address
 from build_names_patch import decode_thumb_bl
+from test_tempo_paths import application_tick_us
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE, STOP, STACK = 0x08008000, 0x08007FF0, 0x20070000
@@ -170,6 +171,33 @@ class Fixture:
 
 
 class TempoHooks(unittest.TestCase):
+    def test_frame_deadline_uses_application_clock(self):
+        for name in MODELS:
+            for delay_us, accepted in ((200000, True), (250000, True), (250100, False)):
+                with self.subTest(model=name, delay_us=delay_us):
+                    f = Fixture(name)
+                    tick_us = application_tick_us(f.model)
+                    f.usb(HEARTBEAT[:6])
+                    f.tick(10000 + delay_us // tick_us)
+                    f.usb(HEARTBEAT[6:])
+                    self.assertEqual(f.turn(), 255 if accepted else 0)
+
+    def test_lease_bridges_observed_heartbeat_spacing_on_application_clock(self):
+        for name in MODELS:
+            with self.subTest(model=name):
+                f = Fixture(name)
+                tick_us = application_tick_us(f.model)
+                for beat in range(4):
+                    start = 10000 + beat * 1162000 // tick_us
+                    f.tick(start)
+                    f.usb(HEARTBEAT)
+                    f.tick(start + 1162000 // tick_us)
+                    self.assertEqual(f.turn(), 255, "lease expired between valid host updates")
+                f.tick(start + 3000000 // tick_us)
+                self.assertEqual(f.turn(), 255, "lease expired before three seconds")
+                f.tick(start + 3000000 // tick_us + 1)
+                self.assertEqual(f.turn(), 0, "lease did not expire after three seconds")
+
     def test_receive_guard_uses_stock_irq_object(self):
         for name, pointer in (("original", 0x200014C8), ("chroma", 0x200014CC)):
             with self.subTest(model=name):
@@ -223,7 +251,7 @@ class TempoHooks(unittest.TestCase):
                 f.usb(HEARTBEAT)
                 f.tick(0x10)
                 self.assertEqual(f.turn(), 255)
-                f.tick((0xFFFFFFF0 + 3001) & 0xFFFFFFFF)
+                f.tick((0xFFFFFFF0 + 30001) & 0xFFFFFFFF)
                 self.assertEqual(f.turn(), 0)
                 self.assertNotEqual(f.word(LEASE), 0x32504D55)
 
@@ -233,7 +261,7 @@ class TempoHooks(unittest.TestCase):
                 with self.subTest(model=name, mask=mask):
                     f = Fixture(name)
                     f.usb(HEARTBEAT)
-                    f.tick(13001)
+                    f.tick(40001)
                     f.uc.reg_write(UC_ARM_REG_PRIMASK, mask)
                     f.poll()
                     self.assertEqual(f.uc.reg_read(UC_ARM_REG_PRIMASK), mask)
@@ -254,13 +282,13 @@ class TempoHooks(unittest.TestCase):
                 with self.subTest(model=name, frame=frame.hex()):
                     f = Fixture(name)
                     f.usb(HEARTBEAT)
-                    f.tick(12900)
+                    f.tick(39900)
                     f.tap(frame)
-                    f.tick(13001)
+                    f.tick(40001)
                     self.assertEqual(f.turn(), 0)
             f = Fixture(name)
             f.tap(HEARTBEAT[:-1])
-            f.tick(10251)
+            f.tick(12501)
             f.tap(b"\xf7")
             self.assertEqual(f.turn(), 0)
             f = Fixture(name)
